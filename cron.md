@@ -1,5 +1,5 @@
 ---
-description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(docker 게이트웨이) + systemd 타이머(브라우저 사이드카) 통합 토글
+description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(docker 게이트웨이) + systemd 타이머(브라우저 사이드카 + brain-drain) 통합 토글
 ---
 
 # /cron
@@ -7,7 +7,7 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 현재 PC 의 **모든 자동발화**를 한 명령으로 일괄 토글. brain-system 자동화가 2곳으로 갈려 있어 통합 제어:
 
 - **OpenClaw cron** — docker 게이트웨이(`2nd-brain-openclaw-gateway`) 안의 텍스트형 스킬 잡 (예: `gmail-label-actions-poll`)
-- **systemd-user 타이머** — 호스트의 브라우저형 사이드카 (예: `openclaw-webmail-sidecar.timer` → webmail-watch). 게이트웨이엔 브라우저가 없어 cron 으로 못 돌리므로 호스트 타이머로 분리됨.
+- **systemd-user 타이머** — 호스트 타이머 2종: (1) 브라우저형 사이드카 (예: `openclaw-webmail-sidecar.timer` → webmail-watch). 게이트웨이엔 브라우저가 없어 cron 으로 못 돌리므로 호스트 타이머로 분리됨. (2) `brain-drain.timer` — refine+brainify 무인 드레인(`claude -p`, 비용 발생). *parser-drain.timer 는 제외 — 결정형·저비용·상시(extract).*
 
 다중 PC 에서 양쪽이 동시에 같은 자동발화를 돌리면 충돌(Telegram 중복 알림·Gmail 중복 forward·state 어긋남·사이트 polling 경합) → **한 번에 한 PC 만 활성** 운영 권장. 그 토글을 명령 한 줄로.
 
@@ -27,9 +27,9 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 - **변경**: `docker exec "$GW" node /app/dist/index.js cron <enable|disable> <id> --token "$TOK"` (데몬 정합 보장하는 정식 경로 — jobs.json 수동편집 금지).
 - 게이트웨이가 안 떠 있으면(`$GW` 비어 있음) OpenClaw cron 토글 불가 → 그 부분만 건너뛰고 보고.
 
-### B. systemd 타이머 (호스트 브라우저 사이드카)
+### B. systemd 타이머 (호스트 — 브라우저 사이드카 + brain-drain)
 
-- 대상 탐색: `systemctl --user list-unit-files 'openclaw-*sidecar*.timer' --no-legend | awk '{print $1}'` (현재 = `openclaw-webmail-sidecar.timer`)
+- 대상 탐색: `{ systemctl --user list-unit-files 'openclaw-*sidecar*.timer' --no-legend; systemctl --user list-unit-files 'brain-drain.timer' --no-legend; } | awk '{print $1}'` (현재 = `openclaw-webmail-sidecar.timer` + `brain-drain.timer`). *parser-drain.timer 는 의도적 제외 — 결정형·상시.*
 - 조회: `systemctl --user is-active <timer>` · `is-enabled <timer>` · 다음 발화는 `systemctl --user list-timers <timer> --no-pager`
 - **off**: `systemctl --user disable --now <timer>` (부팅 자동 해제 + 즉시 정지)
 - **on**: `systemctl --user enable --now <timer>` (부팅 자동 + 즉시 활성)
@@ -78,5 +78,6 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 
 - **OpenClaw cron 정의 원본** = `~/.openclaw/cron/jobs.json` (PC별·미동기). 게이트웨이가 mount 해서 읽음. (구 `openclaw-config/cron/jobs.json.template` 는 2026-05-25 openclaw-config 은퇴로 폐기 — 이제 jobs.json 이 원본.)
 - **사이드카 타이머 정의** = `~/.config/systemd/user/openclaw-*sidecar*.{service,timer}` (PC별). 사이드카 compose·이미지는 `2nd-brain/docker/webmail-sidecar/`.
+- **brain-drain 타이머 정의** = `~/.config/systemd/user/brain-drain.{service,timer}` (PC별). 본체·설치는 `2nd-brain/automation/brain-drain/` (`make install-brain-drain`). refine+brainify 무인 드레인.
 - 실제 활성 상태(cron `enabled` / 타이머 enable)는 **PC 마다 독립** — git/SyncThing 동기 대상 아님.
 - 향후 사이드카 추가(society-watch 등) 시 `openclaw-*sidecar*.timer` 패턴이 자동 포함.
