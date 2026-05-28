@@ -39,7 +39,13 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 다른 PC 의 cron 상태를 *물어보지 않고* 알기 위한 advisory 마커. SyncThing 다단계 체인의 전파 지연·**잠들기 race**(전파 전 노트북 닫으면 유실)를 피해 **gog 로 Google Sheet 에 동기적 클라우드 read/write** — 쓰기가 리턴된 순간 이미 클라우드 영속이라 직후 잠들어도 안전(2026-05-27, 인터넷 상시연결 전제).
 
 - **Sheet**: spreadsheetId `1eXlbYvKVtAo5GEKTBjFp9Uu3t1XDFxee4_vuQFxRfBw`, 탭 `cron-status`, 열 `A=host B=state C=updated`(1행 헤더, 호스트당 1행). 사람 보기: `https://docs.google.com/spreadsheets/d/1eXlbYvKVtAo5GEKTBjFp9Uu3t1XDFxee4_vuQFxRfBw/edit`
-- **gog 전제**: 호스트 gog, 계정 `kimbi.kirams@gmail.com`, 비대화식이라 **`GOG_KEYRING_PASSWORD` 필요**. 매 gog 호출 전 export — 환경에 없으면 이 PC 의 알려진 위치에서 로드(kimbi: `export GOG_KEYRING_PASSWORD=$(grep '^GOG_KEYRING_PASSWORD=' ~/projects/openclaw-docker/.env | cut -d= -f2-)`).
+- **gog 전제**: 호스트 gog, 계정 `kimbi.kirams@gmail.com`, 비대화식이라 **`GOG_KEYRING_PASSWORD` 필요**. 매 gog 호출 전 export. **정본 = Bitwarden**(`gog keyring — <host> host`), **runtime cache = 머신로컬 파일 `~/.config/gogcli/.keyring-password`**(mode 600, 머신별 독립 — keyring 자체가 머신별 자물쇠라 *동기 금지*). 로드:
+  ```bash
+  if [ -r ~/.config/gogcli/.keyring-password ]; then
+    export GOG_KEYRING_PASSWORD=$(cat ~/.config/gogcli/.keyring-password)
+  fi
+  ```
+  파일 없으면 §C 단계만 advisory 실패(non-fatal — 토글은 진행). 비번 망실 시 = `gog auth add kimbi.kirams@gmail.com` 재인증 1회로 복구(데이터 손실 0). Bitwarden 갱신 시 이 파일도 함께 갱신.
 - **읽기**: `gog sheets get <SID> 'A2:C50' -a kimbi.kirams@gmail.com -p` → TSV(`host⇥state⇥updated`) 행 파싱.
 - **쓰기 (자기 행만)**: 읽은 행에서 `A`열==`$(hostname)` 인 행번호 N 찾기 → 있으면 `gog sheets update <SID> "A{N}:C{N}" "<host>|<state>|<ISO8601>"` (**파이프=셀, 쉼표=행**), 없으면 `gog sheets append <SID> 'A:C' "<host>|<state>|<ts>"`.
 - **소유권**: 각 PC 는 *자기 host 행만* 갱신, 남의 행 불변 → 쓰기 주체 안 겹침, 양쪽 동시 사고도 둘 다 `on` 으로 드러남.
