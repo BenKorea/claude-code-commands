@@ -51,10 +51,14 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 ### status
 
 1. **hostname 출력** (어느 PC 인지 또렷이).
-2. **A — OpenClaw cron**: `~/.openclaw/cron/jobs.json` 읽어 표 (`이름 | 상태 | ID`). 게이트웨이 미실행이면 "게이트웨이 미실행 — cron 토글 불가" 표시(jobs.json 은 그래도 읽힘).
-3. **B — systemd 타이머**: 호스트 타이머별(parser-drain·brain-drain·사이드카) `active`·`enabled`·다음 발화 표. (NEXT 가 비어 있으면 재무장 결함 신호 — `OnActiveSec` 시드 확인. 단 list-timers NEXT 가 "-"라도 `systemctl status` 의 `Trigger:` 가 잡혀 있으면 정상 — 시계 skew 표시 quirk.)
-4. **C — Sheet 마커 읽기 (§C)**: `gog sheets get` 로 **모든 행** 보고 — `kimbi: on (10:41)` · `ai4lt: off (…)` 식 각 PC 상태+시각. **이 PC 행을 실제 상태와 대조**: 마커=on 인데 실제 off(or 반대)면 **불일치 경고**(/cron 안 거친 토글 or stale). → 이로써 *다른 PC cron 상태를 물어볼 필요가 없다*. (gog 실패 시 "마커 읽기 실패(gog: …)" 만 보고하고 나머지 status 는 계속.)
-5. **요약 줄**: `<hostname> — cron enabled N/disabled M · 타이머 active K/total T · 마커: 이PC=on, 타PC=<상태>`.
+2. **게이트웨이 헬스 (A 의 전제 — 3시점 점검)**. 게이트웨이가 떠 있으면 아래 셋 다 확인, 미실행이면 이 단계 통째 건너뛰고 A 의 jobs.json 만 읽음.
+   - **inside-out (자가진단·가장 깊음)**: `docker exec "$GW" node /app/dist/index.js doctor --lint --severity-min error --deep` → `ok:true` + `findings:[]` 이어야 *진짜 정상*. ⚠ 기본 `--lint` 의 `ok:false` 는 advisory warning(평문 토큰·`lan` 바인딩·미설치 스킬 default-allow 등 ~50건) — error 만 진짜 신호라 `--severity-min error` 가 권위. doctor 는 채널(Telegram 토큰·pairing)·모델·최근 세션·skills-readiness 까지 봐 healthz 만으론 못 잡는 회귀(봇 토큰 만료·모델 misconfig 등)를 잡음.
+   - **outside-in (도달성·도커 상태)**: `docker ps --filter name=openclaw-gateway --format '{{.Status}}'` 가 `Up ... (healthy)`; `curl -fsS http://127.0.0.1:18789/healthz` 가 `{"ok":true,"status":"live"}`. doctor 는 컨테이너 *안쪽* 시점이라 호스트→컨테이너 포트 도달성·도커 헬스체크는 별도.
+   - **회귀 가드 (PATH fix·번들 claude)**: `docker exec "$GW" claude --version` 이 `2.1.x (Claude Code)`. 비면 extra.yml 의 PATH 라인이 깨졌다는 신호 — 채널 메시지가 ENOENT/EPIPE 로 죽음(install doc §5 의 핵심 회귀).
+3. **A — OpenClaw cron**: `~/.openclaw/cron/jobs.json` 읽어 표 (`이름 | 상태 | ID`). 게이트웨이 미실행이면 "게이트웨이 미실행 — cron 토글 불가" 표시(jobs.json 은 그래도 읽힘).
+4. **B — systemd 타이머**: 호스트 타이머별(parser-drain·brain-drain·사이드카) `active`·`enabled`·다음 발화 표. (NEXT 가 비어 있으면 재무장 결함 신호 — `OnActiveSec` 시드 확인. 단 list-timers NEXT 가 "-"라도 `systemctl status` 의 `Trigger:` 가 잡혀 있으면 정상 — 시계 skew 표시 quirk.)
+5. **C — Sheet 마커 읽기 (§C)**: `gog sheets get` 로 **모든 행** 보고 — `kimbi: on (10:41)` · `ai4lt: off (…)` 식 각 PC 상태+시각. **이 PC 행을 실제 상태와 대조**: 마커=on 인데 실제 off(or 반대)면 **불일치 경고**(/cron 안 거친 토글 or stale). → 이로써 *다른 PC cron 상태를 물어볼 필요가 없다*. (gog 실패 시 "마커 읽기 실패(gog: …)" 만 보고하고 나머지 status 는 계속.)
+6. **요약 줄**: `<hostname> — gateway <healthy|warn|down> · cron enabled N/disabled M · 타이머 active K/total T · 마커: 이PC=<상태>, 타PC=<상태>`. (gateway: 3시점 모두 통과=`healthy`, doctor warning 만=`healthy(warn)`, doctor error 또는 outside-in 실패=`unhealthy`, 미실행=`down`.)
 
 ### off
 
