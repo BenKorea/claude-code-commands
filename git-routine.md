@@ -82,9 +82,26 @@ c. 저장소별로 순차 실행:
    - `git push`
    - 실패 시 즉시 중단하고 어디서 멈췄는지 보고.
 
+### 3.5. MCP user-scope 자동 적용 (`pull`·`sync` 둘 다)
+
+`~/.claude/skills/` repo pull 이 완료된 직후, **`_mcp-servers/apply.sh`** 가 존재하면 자동 실행 — registry.json 의 user-scope MCP 정의를 `~/.claude.json` 에 멱등 반영. (skill 의 *디스크 파일 = 자동 등록* 모델을 MCP 의 *키 writeback* 으로 한 단계 매개.)
+
+```bash
+if [ -x "$HOME/.claude/skills/_mcp-servers/apply.sh" ]; then
+  bash "$HOME/.claude/skills/_mcp-servers/apply.sh"
+fi
+```
+
+- **멱등**: `= unchanged` 면 no-op, `↻ updated` 면 remove+re-add, `✓ added` 면 신규
+- **orphan 경고만** — registry 에 없는 user-scope 서버는 자동 제거 X (수동 권장)
+- `claude.ai *` connector 는 자동 skip (Anthropic OAuth 메커니즘)
+- prereq (uvx·cmd.exe 등) 부재 시 `claude mcp list` 가 spawn 실패 표시 → 해당 머신에만 설치
+
+상세 → `~/.claude/skills/_mcp-servers/README.md`.
+
 ### 4. 최종 요약
 
-저장소별: pull 결과 / commit·push 결과 / skip 사유 / sanity check 경고.
+저장소별: pull 결과 / commit·push 결과 / skip 사유 / sanity check 경고 / **MCP apply 결과** (+M added, ↻N updated 등).
 
 ## 안전 규칙
 
