@@ -23,8 +23,8 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 
 - 게이트웨이 컨테이너 탐색: `GW=$(docker ps --filter name=openclaw-gateway --format '{{.Names}}' | head -1)`
 - gateway 토큰: `TOK=$(docker exec "$GW" python3 -c "import json;print(json.load(open('/home/node/.openclaw/openclaw.json'))['gateway']['auth']['token'])")`
-- **조회(빠름)**: 호스트 `~/.openclaw/cron/jobs.json` 직접 읽기 (`name`·`id`·`enabled`). CLI `cron list` 는 게이트웨이 왕복 ~10초라 read 에 부적합 (2026-05-17 실측). jobs.json 이 enabled 상태의 원본.
-- **변경**: `docker exec "$GW" node /app/dist/index.js cron <enable|disable> <id> --token "$TOK"` (데몬 정합 보장하는 정식 경로 — jobs.json 수동편집 금지).
+- **조회 (권위 = SQLite)**: ⚠️ 2026.6.8 부터 cron 스토어가 평면 JSON(`~/.openclaw/cron/jobs.json`) → **SQLite(`~/.openclaw/state/openclaw.sqlite` 의 `cron_jobs` 테이블)** 로 이전됨. 구 `jobs.json` 은 `jobs.json.migrated` 로 개명돼 **더 이상 없음** — 절대 이걸 진실의 원천으로 읽지 말 것(읽으면 "잡 비어있음=유실" 오판 → 매번 중복 재등록되는 함정. 2026-06-24 규명). 권위 조회 = `docker exec "$GW" node /app/dist/index.js cron list --all --json --token "$TOK"` (게이트웨이 왕복 ~10초지만 유일 권위. `--all` 없으면 disabled 잡이 안 보임). 더 빠른 직접 read 가 필요하면 호스트 SQLite 를 node:sqlite read-only 로: `docker exec "$GW" node -e '…SELECT job_id,name,enabled,schedule_expr FROM cron_jobs…'`(store_key 무관 전부 본다 — 옛 store_key 의 고아 잡까지 드러남). `~/.openclaw/state/` 는 bind-mount 라 영속(재시작·업그레이드 생존).
+- **변경**: `docker exec "$GW" node /app/dist/index.js cron <enable|disable|rm> <id> --token "$TOK"` (데몬 정합 보장하는 정식 경로 — SQLite 직접편집 금지). 잡이 통째로 없으면(마이그레이션 유실 등) `cron add` 로 재등록하되 **먼저 `cron list --all` 로 중복 여부 확인** (중복이면 add 말고 enable).
 - 게이트웨이가 안 떠 있으면(`$GW` 비어 있음) OpenClaw cron 토글 불가 → 그 부분만 건너뛰고 보고.
 
 ### B. systemd 타이머 (호스트 자동발화 전부 — parser-drain·brain-drain·사이드카)
@@ -57,18 +57,18 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 ### status
 
 1. **hostname 출력** (어느 PC 인지 또렷이).
-2. **게이트웨이 헬스 (A 의 전제 — 3시점 점검)**. 게이트웨이가 떠 있으면 아래 셋 다 확인, 미실행이면 이 단계 통째 건너뛰고 A 의 jobs.json 만 읽음.
+2. **게이트웨이 헬스 (A 의 전제 — 3시점 점검)**. 게이트웨이가 떠 있으면 아래 셋 다 확인, 미실행이면 이 단계 통째 건너뛰고 A 의 SQLite 직접 read 만 함(`cron list` 는 게이트웨이 필요 → 미실행 시 node:sqlite read-only 로 `cron_jobs` 조회).
    - **inside-out (자가진단·가장 깊음)**: `docker exec "$GW" node /app/dist/index.js doctor --lint --severity-min error --deep` → `ok:true` + `findings:[]` 이어야 *진짜 정상*. ⚠ 기본 `--lint` 의 `ok:false` 는 advisory warning(평문 토큰·`lan` 바인딩·미설치 스킬 default-allow 등 ~50건) — error 만 진짜 신호라 `--severity-min error` 가 권위. doctor 는 채널(Telegram 토큰·pairing)·모델·최근 세션·skills-readiness 까지 봐 healthz 만으론 못 잡는 회귀(봇 토큰 만료·모델 misconfig 등)를 잡음.
    - **outside-in (도달성·도커 상태)**: `docker ps --filter name=openclaw-gateway --format '{{.Status}}'` 가 `Up ... (healthy)`; `curl -fsS http://127.0.0.1:18789/healthz` 가 `{"ok":true,"status":"live"}`. doctor 는 컨테이너 *안쪽* 시점이라 호스트→컨테이너 포트 도달성·도커 헬스체크는 별도.
    - **회귀 가드 (PATH fix·번들 claude)**: `docker exec "$GW" claude --version` 이 `2.1.x (Claude Code)`. 비면 extra.yml 의 PATH 라인이 깨졌다는 신호 — 채널 메시지가 ENOENT/EPIPE 로 죽음(install doc §5 의 핵심 회귀).
-3. **A — OpenClaw cron**: `~/.openclaw/cron/jobs.json` 읽어 표 (`이름 | 상태 | ID`). 게이트웨이 미실행이면 "게이트웨이 미실행 — cron 토글 불가" 표시(jobs.json 은 그래도 읽힘).
+3. **A — OpenClaw cron**: `cron list --all --json` (또는 SQLite `cron_jobs` 직접 read) 로 표 (`이름 | 상태 | ID`). 게이트웨이 미실행이면 "게이트웨이 미실행 — cron 토글 불가" 표시(SQLite 직접 read 는 그래도 가능). **중복 잡 가드**: 같은 name 이 2건 이상이거나 enabled 가 2건 이상이면 경고 — 마이그레이션 유실 후 중복 재등록의 흔적(2026-06-24). 정리는 disabled 중복을 `cron rm`.
 4. **B — systemd 타이머**: 호스트 타이머별(parser-drain·brain-drain·사이드카) `active`·`enabled`·다음 발화 표. (NEXT 가 비어 있으면 재무장 결함 신호 — `OnActiveSec` 시드 확인. 단 list-timers NEXT 가 "-"라도 `systemctl status` 의 `Trigger:` 가 잡혀 있으면 정상 — 시계 skew 표시 quirk.)
 5. **C — Sheet 마커 읽기 (§C)**: `gog sheets get` 로 **모든 행** 보고 — `kimbi: on (10:41)` · `ai4lt: off (…)` 식 각 PC 상태+시각. **이 PC 행을 실제 상태와 대조**: 마커=on 인데 실제 off(or 반대)면 **불일치 경고**(/cron 안 거친 토글 or stale). → 이로써 *다른 PC cron 상태를 물어볼 필요가 없다*. (gog 실패 시 "마커 읽기 실패(gog: …)" 만 보고하고 나머지 status 는 계속.)
 6. **요약 줄**: `<hostname> — gateway <healthy|warn|down> · cron enabled N/disabled M · 타이머 active K/total T · 마커: 이PC=<상태>, 타PC=<상태>`. (gateway: 3시점 모두 통과=`healthy`, doctor warning 만=`healthy(warn)`, doctor error 또는 outside-in 실패=`unhealthy`, 미실행=`down`.)
 
 ### off
 
-1. **A**: jobs.json 의 `enabled=true` 필터 → 각 ID `docker exec "$GW" node /app/dist/index.js cron disable <id> --token "$TOK"` 순차. 실패 시 즉시 중단·보고.
+1. **A**: `cron list --all --json` 의 `enabled=true` 필터 → 각 ID `docker exec "$GW" node /app/dist/index.js cron disable <id> --token "$TOK"` 순차. 실패 시 즉시 중단·보고.
 2. **B**: 활성 호스트 타이머 전부 → `systemctl --user disable --now <timer>`.
 3. **C — Sheet 마커 갱신 (§C)**: 이 PC 의 host 행을 `<host>|off|<now>` 로 *자기 행만* 갱신(없으면 append). gog 실패 시 경고만 하고 토글 결과는 유효(non-fatal).
 4. 결과 표 + 요약 ("이 PC: cron N개 disable + 타이머 M개 정지 · 마커 <host>→off").
@@ -77,7 +77,7 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 ### on
 
 0. **C — Sheet 선확인 (§C, 이중발화 가드)**: `gog sheets get` 으로 *다른* PC 행의 `state` 가 `on` 이면 → **이중발화 경고**: "마커상 `<host>` 가 발화 중입니다(updated …). 그 PC 를 먼저 `/cron off` 안 하면 충돌(이중 파싱·중복 노트·Contact 중복). 그래도 이 PC 를 켤까요?" Dr. Ben 확인 후 진행. (다른 PC 가 off·없음이면 조용히 진행. gog 실패 시 가드 불가 — 경고하고 사용자 판단으로 진행.)
-1. **A**: jobs.json 의 `enabled=false` 필터 → 각 ID `docker exec "$GW" node /app/dist/index.js cron enable <id> --token "$TOK"` 순차.
+1. **A**: `cron list --all --json` 의 `enabled=false` 필터 → 각 ID `docker exec "$GW" node /app/dist/index.js cron enable <id> --token "$TOK"` 순차. ⚠️ 잡이 **하나도 없으면**(스토어 빈 상태) `cron add` 로 재등록(정의는 §참고). 단 add 전 `cron list --all` 로 동명 잡 중복 없는지 확인 — 있으면 add 말고 그 잡 enable (중복 누적 방지).
 2. **B**: 호스트 타이머 전부 → `systemctl --user enable --now <timer>` (`--now` 가 OnActiveSec 시드 발화 → 체인 시작).
 3. **C — Sheet 마커 갱신 (§C)**: 이 PC 의 host 행을 `<host>|on|<now>` 로 *자기 행만* 갱신(없으면 append). gog 실패 시 경고만(non-fatal).
 4. 결과 표 + 요약 ("이 PC: cron N개 enable + 타이머 M개 활성 · 마커 <host>→on").
@@ -85,7 +85,7 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 ## 안전 규칙
 
 - 이 명령은 **현재 PC** 만 토글 — cron `enabled`·타이머 enable 둘 다 **머신별 로컬**(동기 대상 아님). 다른 PC 상태는 **§C Google Sheet 마커(gog, 즉시 클라우드)로 *읽어* 확인**(토글은 여전히 현재 PC 만, 마커는 가시성 전용 — 동기되는 건 *상태 기록*이지 *토글*이 아니다). 마커 쓰기는 **자기 host 행만** — 남의 행 절대 안 건드림. gog 실패는 non-fatal(토글 우선).
-- **조회=직접읽기**(jobs.json·systemctl is-active), **변경만 정식경로**(docker exec cron / systemctl). jobs.json 의 `enabled` 를 수동편집하지 말 것 — `cron <verb>` CLI 가 데몬 정합 보장.
+- **조회 = SQLite 권위**(`cron list --all --json` 또는 `cron_jobs` 테이블 read·systemctl is-active), **변경만 정식경로**(docker exec cron / systemctl). SQLite 를 수동편집하지 말 것 — `cron <verb>` CLI 가 데몬 정합 보장. ⚠️ **구 `~/.openclaw/cron/jobs.json` 은 폐기됨**(2026.6.8 SQLite cutover, `.migrated` 잔존) — 이걸 읽으면 매번 "유실" 오판 → 중복 재등록 루프(2026-06-24 규명).
 - 양쪽 PC 가 *모두 off* 로 잊히면 아무 데서도 안 돈다 → status 요약에 hostname 또렷이 표시.
 - 게이트웨이 미실행이면 A(cron) 토글 불가 — B(타이머)만 처리하고 그 사실 보고.
 - (native 운영 PC: docker 게이트웨이가 없으면 A 는 호스트 `openclaw cron <verb> <id>` 가 정식 경로. Dr. Ben 현 환경은 **docker-only** 라 `docker exec` 우선 — 2026-05-25 docker cutover.)
@@ -102,7 +102,8 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 
 ## 참고
 
-- **OpenClaw cron 정의 원본** = `~/.openclaw/cron/jobs.json` (PC별·미동기). 게이트웨이가 mount 해서 읽음. (구 `openclaw-config/cron/jobs.json.template` 는 2026-05-25 openclaw-config 은퇴로 폐기 — 이제 jobs.json 이 원본.)
+- **OpenClaw cron 스토어 원본** = `~/.openclaw/state/openclaw.sqlite` 의 `cron_jobs` 테이블 (PC별·미동기, bind-mount 영속). **2026.6.8 에 평면 `jobs.json` → SQLite 로 cutover** — 구 `~/.openclaw/cron/jobs.json` 은 `jobs.json.migrated`(+`.bak`)로 남았으나 **죽은 잔존물**(읽지 말 것). (이전 변천: `openclaw-config/cron/jobs.json.template` → 2026-05-25 폐기 → `jobs.json` 원본 → 2026.6.8 SQLite.)
+- **gmail-label-actions-poll 재등록 정의** (스토어가 비었을 때 §on 1 에서 사용): `cron add --agent main --name gmail-label-actions-poll --cron "*/30 * * * *" --session isolated --wake now --message "/gmail-label-actions" --channel telegram --to 8669227844 --no-deliver --token "$TOK"`. (`--no-deliver`=조용 모드 = gmail-report off 상태. 보고 켜려면 `gmail-report` 스킬 또는 `cron edit --announce`.)
 - **parser-drain 타이머 정의** = `~/.config/systemd/user/parser-drain.{service,timer}` (PC별). 본체·설치는 `2nd-brain/docker/parser-drain/` (`cd ~/projects/2nd-brain/docker && make install-parser-drain`). extract(듀얼 파싱).
 - **brain-drain 타이머 정의** = `~/.config/systemd/user/brain-drain.{service,timer}` (PC별). 본체·설치는 `2nd-brain/automation/brain-drain/` (`make install-brain-drain`). refine+brainify 무인 드레인.
 - **사이드카 타이머 정의** = `~/.config/systemd/user/openclaw-*sidecar*.{service,timer}` (PC별). 사이드카 compose·이미지는 `2nd-brain/docker/webmail-sidecar/`.
