@@ -49,7 +49,9 @@ git -C <repo> rev-parse --abbrev-ref HEAD                 # 현재 브랜치
 
 | 카테고리 | 경로 | 브랜치 | ahead/behind | dirty 파일 수 |
 
-특수 상태는 별도 줄: upstream 없는 브랜치·detached HEAD·`main` 이외의 브랜치.
+특수 상태는 별도 줄: upstream 없는 브랜치·detached HEAD·**인벤토리 선언 브랜치와 다른 브랜치**.
+
+> 인벤토리가 선언한 브랜치와 일치하면 `main` 이 아니어도 **경고하지 않는다** (예: `radsafety-pwa` 의 `dev` 는 정상 상태). 선언과 *다를* 때만 경고 — 그때는 대개 새 PC 에서 clone 후 `git checkout <동기브랜치>` 를 안 한 경우다.
 
 ### 1.5. Sanity check (자동 탐색)
 
@@ -110,7 +112,11 @@ fi
 - `git add .` / `git add -A` 금지 — `.env`·credentials 우발 포함 방지.
 - `--no-verify` 등 hook 우회 금지.
 - 새 commit 만 생성, `--amend` 금지.
-- detached HEAD / upstream 없는 브랜치 / `main` 이외의 브랜치는 자동 commit·push 대상에서 제외하고 보고만.
+- **자동 commit·push 는 인벤토리(`repos.md`)의 「동기 브랜치 규약」 표가 선언한 브랜치에서만.** 그 외(detached HEAD · upstream 없는 브랜치 · 선언되지 않은 브랜치)는 제외하고 보고만.
+  - 표가 대부분 repo 를 `main` 으로 선언하므로 실질 동작은 종전과 같다. 달라지는 건 **의도적으로 다른 브랜치를 선언한 repo** 다 — 예: `radsafety-pwa` = `dev`.
+  - 표에 **`🚫 자동 push 금지`** 로 표시된 브랜치는 **체크아웃돼 있어도 밀지 않는다** (예: `radsafety-pwa` 의 `main` — Vercel 배포·PR 전용). 이 경우 dirty 를 보고만 하고 사용자에게 PR 경로를 안내한다.
+  - 규칙의 취지는 "main 만 허용"이 아니라 **"선언되지 않은 브랜치에 함부로 push 하지 않는다"** 이다. 운영 repo 에서는 오히려 `main` 이 보호 대상이다.
+- 동기 브랜치가 `main` 이 아닌 repo 는 **`dev` 가 `main` 보다 몇 커밋 앞서는지 보고**한다(배포 시점 판단용). 병합·PR 은 자동화하지 않는다.
 - commit 메시지는 변경 내용 기반으로 제안하되 Co-Authored-By 트레일러는 붙이지 않음 (개인 vault·설정 동기 루틴이므로).
 - 인벤토리(`repos.md`) 가 없으면 `sync` 거부 (위 폴백 참조). `pull`·`status` 만 허용.
 
