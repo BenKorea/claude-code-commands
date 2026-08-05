@@ -7,7 +7,7 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 현재 PC 의 **모든 자동발화**를 한 명령으로 일괄 토글. brain-system 자동화가 2곳으로 갈려 있어 통합 제어:
 
 - **OpenClaw cron** — docker 게이트웨이(`2nd-brain-openclaw-gateway`) 안의 텍스트형 스킬 잡 (예: `gmail-label-actions-poll`)
-- **systemd-user 타이머** — 게이트웨이 밖 호스트 자동발화 전부: (1) `parser-drain.timer`(extract — 듀얼 파싱), (2) `brain-drain.timer`(refine+brainify 무인 `claude -p`, 비용 발생), (3) 브라우저형 사이드카(예: `openclaw-webmail-sidecar.timer` → webmail-watch; 게이트웨이엔 브라우저가 없어 호스트 타이머로 분리).
+- **systemd-user 타이머** — 게이트웨이 밖 호스트 자동발화 전부: (1) `parser-drain.timer`(extract — 듀얼 파싱), (2) `brain-drain.timer`(refine+brainify 무인 `claude -p`, 비용 발생), (3) 브라우저형 사이드카(예: `openclaw-webmail-sidecar.timer` → webmail-watch; 게이트웨이엔 브라우저가 없어 호스트 타이머로 분리), (4) `brain-health.timer`(아침 헬스체크·텔레그램 보고 — 읽기 전용 관측).
 
 다중 PC 에서 양쪽이 동시에 같은 자동발화를 돌리면 충돌(Telegram 중복 알림·Gmail 중복 forward·**parser-drain 이중 파싱 + SyncThing _parse 충돌**·**brain-drain 중복 노트·claude 비용 2배·파일 이동 경합**·사이트 polling 경합) → **한 번에 한 PC 만 활성**. 그래서 parser-drain 도 "결정형이라 상시" 가 아니라 *발화 머신에서만* 돈다(나머지 PC 는 수동 on-demand 만). 그 단일 토글을 명령 한 줄로.
 
@@ -29,7 +29,8 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 
 ### B. systemd 타이머 (호스트 자동발화 전부 — parser-drain·brain-drain·사이드카)
 
-- 대상 탐색: `{ systemctl --user list-unit-files 'parser-drain.timer' 'brain-drain.timer' 'openclaw-*sidecar*.timer' --no-legend; } | awk '{print $1}'` (현재 = `parser-drain.timer` + `brain-drain.timer` + `openclaw-webmail-sidecar.timer`). 게이트웨이 밖 호스트 자동발화는 **전부** 여기로 — 단일 발화 머신 원칙(이중 파싱·중복 노트·_parse 충돌 방지).
+- 대상 탐색: `{ systemctl --user list-unit-files 'parser-drain.timer' 'brain-drain.timer' 'brain-health.timer' 'openclaw-*sidecar*.timer' --no-legend; } | awk '{print $1}'` (현재 = `parser-drain.timer` + `brain-drain.timer` + `brain-health.timer` + `openclaw-webmail-sidecar.timer`). 게이트웨이 밖 호스트 자동발화는 **전부** 여기로 — 단일 발화 머신 원칙(이중 파싱·중복 노트·_parse 충돌 방지).
+  - **`brain-health.timer` 도 같이 토글하는 이유** (2026-08-04 신설): 이 타이머는 쓰기 없는 *관측*이라 충돌 위험이 없지만, **발화 머신 = 감시 대상 = 보고 머신**이어야 한다. 꺼진 머신에서 계속 돌면 ① 아침 보고가 두 통 오고 ② 그 머신의 타이머가 전부 꺼져 있으니 "자동 작업 꺼짐" 을 문제로 오보고한다. 그래서 발화와 함께 켜고 끈다.
 - 조회: `systemctl --user is-active <timer>` · `is-enabled <timer>` · 다음 발화는 `systemctl --user list-timers <timer> --no-pager`
 - **off**: `systemctl --user disable --now <timer>` (부팅 자동 해제 + 즉시 정지)
 - **on**: `systemctl --user enable --now <timer>` (부팅 자동 + 즉시 활성)
@@ -108,6 +109,7 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 - **gmail-label-actions-poll 재등록 정의** (스토어가 비었을 때 §on 1 에서 사용): `cron add --agent main --name gmail-label-actions-poll --cron "*/30 * * * *" --session isolated --wake now --message "/gmail-label-actions" --channel telegram --to 8669227844 --no-deliver --token "$TOK"`. (`--no-deliver`=조용 모드 = gmail-report off 상태. 보고 켜려면 `gmail-report` 스킬 또는 `cron edit --announce`.)
 - **parser-drain 타이머 정의** = `~/.config/systemd/user/parser-drain.{service,timer}` (PC별). 본체·설치는 `2nd-brain/docker/parser-drain/` (`cd ~/projects/2nd-brain/docker && make install-parser-drain`). extract(듀얼 파싱).
 - **brain-drain 타이머 정의** = `~/.config/systemd/user/brain-drain.{service,timer}` (PC별). 본체·설치는 `2nd-brain/automation/brain-drain/` (`make install-brain-drain`). refine+brainify 무인 드레인.
+- **brain-health 타이머 정의** = `~/.config/systemd/user/brain-health.{service,timer}` (PC별 심링크). 본체·설치는 `2nd-brain/automation/health/`(README 참조). 매일 06:40 KST 29항목 점검 → 텔레그램 아침 보고. 머신별 설정은 `~/.config/2nd-brain/health.env`(git 미추적).
 - **사이드카 타이머 정의** = `~/.config/systemd/user/openclaw-*sidecar*.{service,timer}` (PC별). 사이드카 compose·이미지는 `2nd-brain/docker/webmail-sidecar/`.
 - 실제 활성 상태(cron `enabled` / 타이머 enable)는 **PC 마다 독립** — git/SyncThing 동기 대상 아님.
 - **cron 상태 마커** = **Google Sheet** spreadsheetId `1eXlbYvKVtAo5GEKTBjFp9Uu3t1XDFxee4_vuQFxRfBw`(탭 `cron-status`, gog, 계정 kimbi.kirams). 호스트당 1행(`host|state|updated`), **각 PC 가 자기 행만 기록·남은 읽기**. enabled 토글은 미동기지만 *각 PC 발화 여부* 가시성은 이 advisory 마커로 공유 — /cron on/off 가 자기 행 갱신(§C), status 가 전부 읽음. (변천: 2026-05-27 신설 단일 `active_host`→PC별 항목(vault SyncThing `cron-active-host.md`)→**gog Google Sheet 로 전환**(SyncThing 전파지연·잠들기 race 회피, 동기 클라우드 write). 구 vault 파일은 Sheet 포인터로 격하.)
