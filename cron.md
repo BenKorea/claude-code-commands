@@ -103,6 +103,14 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 
 → (a) 양쪽 동시 발화 없음, (b) 새 PC 가 옛 코드로 안 돎.
 
+## 알림을 *지금* 받고 싶을 때 (토글이 아니라 발사)
+
+`/cron` 은 **자동발화 on/off** 다. "지금 상태를 한 통 보내줘"는 다른 일이며, 알림마다 1회성 호출이 따로 있다 —
+아침 헬스체크 `HEALTH_FORCE=1 brain-health.sh`, 밀린 파싱 실패 `parser-drain.sh --alert-only` 등.
+
+**권위·명령 전문** = vault [`02_areas/brain-system/README.md` §알림 수동 발사](../../projects/2nd-brain-vault/knowledge/02_areas/brain-system/README.md).
+(cron 을 꺼 둔 PC 에서도 1회성 발사는 된다 — 끄는 건 *반복 발화*지 명령 자체가 아니다.)
+
 ## 참고
 
 - **OpenClaw cron 스토어 원본** = `~/.openclaw/state/openclaw.sqlite` 의 `cron_jobs` 테이블 (PC별·미동기, bind-mount 영속). **2026.6.8 에 평면 `jobs.json` → SQLite 로 cutover** — 구 `~/.openclaw/cron/jobs.json` 은 `jobs.json.migrated`(+`.bak`)로 남았으나 **죽은 잔존물**(읽지 말 것). (이전 변천: `openclaw-config/cron/jobs.json.template` → 2026-05-25 폐기 → `jobs.json` 원본 → 2026.6.8 SQLite.)
