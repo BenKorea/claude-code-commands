@@ -31,6 +31,7 @@ description: 현재 PC 의 자동발화 일괄 on/off/status — OpenClaw cron(d
 
 - 대상 탐색: `{ systemctl --user list-unit-files 'parser-drain.timer' 'brain-drain.timer' 'brain-health.timer' 'openclaw-*sidecar*.timer' --no-legend; } | awk '{print $1}'` (현재 = `parser-drain.timer` + `brain-drain.timer` + `brain-health.timer` + `openclaw-webmail-sidecar.timer`). 게이트웨이 밖 호스트 자동발화는 **전부** 여기로 — 단일 발화 머신 원칙(이중 파싱·중복 노트·_parse 충돌 방지).
   - **`brain-health.timer` 도 같이 토글하는 이유** (2026-08-04 신설): 이 타이머는 쓰기 없는 *관측*이라 충돌 위험이 없지만, **발화 머신 = 감시 대상 = 보고 머신**이어야 한다. 꺼진 머신에서 계속 돌면 ① 아침 보고가 두 통 오고 ② 그 머신의 타이머가 전부 꺼져 있으니 "자동 작업 꺼짐" 을 문제로 오보고한다. 그래서 발화와 함께 켜고 끈다.
+  - **`radsafety-effective.timer` 는 일부러 제외** (2026-11-23): 법제처 eflaw API 가 **등록 IP(kimbi)** 에서만 응답하므로 이 타이머는 원래 kimbi 한 곳에만 있고, 다른 PC 에선 돌아도 쓰기 0·종료코드 2 로 끝난다 → 이중 발화가 구조적으로 불가능하다. 반대로 failover 로 kimbi 를 `off` 할 때 같이 끄면 대신 돌 머신이 없어 법령 판본 수집만 멈춘다. 그래서 `/cron` 토글 대상이 아니다(Oracle VM 등 다른 등록 IP 머신이 생기면 재검토). 상태 확인만: `systemctl --user list-timers radsafety-effective.timer`.
 - 조회: `systemctl --user is-active <timer>` · `is-enabled <timer>` · 다음 발화는 `systemctl --user list-timers <timer> --no-pager`
 - **off**: `systemctl --user disable --now <timer>` (부팅 자동 해제 + 즉시 정지)
 - **on**: `systemctl --user enable --now <timer>` (부팅 자동 + 즉시 활성)
